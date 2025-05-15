@@ -194,7 +194,7 @@ def get_table_data_detalle(year_filter=None, start_date=None, end_date=None):
         'pmf': float(item.DetalleMovimiento.pmf) if item.DetalleMovimiento.pmf else None,
         'pvl': float(item.DetalleMovimiento.pvl) if item.DetalleMovimiento.pvl else None,
         'pvp': float(item.DetalleMovimiento.pvp) if item.DetalleMovimiento.pvp else None,
-        'fecha_movimiento': item.fecha.strftime('%Y-%m-%d')
+        'fecha_movimiento': item.fecha.strftime('%Y-%m-%d') if item.fecha else "N/A"  # Aquí la protección contra None
     } for item in results])
 
     return df
