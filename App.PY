@@ -173,7 +173,7 @@ def insertar_datos_desde_excel_buffer(buffer, ruta_db):
 
 # --- Funciones para mostrar tabla y detalle ---
 
-def get_table_data_detalle(year_filter=None, start_date=None, end_date=None):
+def get_table_data_detalle(year_filter=None, start_date=None, end_date=None, unidad_gfh=None, producto_espec=None):
     session = Session()
     query = session.query(DetalleMovimiento, Movimiento.fecha).join(Movimiento, Movimiento.id == DetalleMovimiento.movimiento_id)
 
@@ -182,6 +182,12 @@ def get_table_data_detalle(year_filter=None, start_date=None, end_date=None):
 
     if start_date and end_date:
         query = query.filter(Movimiento.fecha >= start_date, Movimiento.fecha <= end_date)
+
+    if unidad_gfh:
+        query = query.filter(Movimiento.unidad_gfh == unidad_gfh)
+
+    if producto_espec:
+        query = query.filter(Movimiento.producto_espec == producto_espec)
 
     results = query.all()
     session.close()
@@ -264,6 +270,29 @@ app.layout = html.Div([
     ], style={'padding': '20px'}),
 
     html.Div([
+        html.Label("Filtrar por Unidad:"),
+        dcc.Dropdown(
+            id='unidad-dropdown',
+            options=[],  # Se llenará dinámicamente
+            placeholder="Seleccionar unidad",
+            clearable=True,
+            value=None
+        )
+    ], style={'padding': '20px'}),
+
+    # Dropdown para productos
+    html.Div([
+        html.Label("Filtrar por Producto:"),
+        dcc.Dropdown(
+            id='producto-dropdown',
+            options=[],  # Se llenará dinámicamente
+            placeholder="Seleccionar producto",
+            clearable=True,
+            value=None
+        )
+    ], style={'padding': '20px'}),
+
+    html.Div([
         html.Label("Seleccionar Rango de Fechas:"),
         dcc.DatePickerRange(
             id='date-picker-range',
@@ -316,13 +345,37 @@ def procesar_archivo_subido(contents, filename):
     ])
 
 @app.callback(
+    Output('unidad-dropdown', 'options'),
+    Input('upload-data', 'contents')  # Se refresca al subir archivo
+)
+def cargar_unidades_opciones(_):
+    session = Session()
+    unidades = session.query(Unidad).order_by(Unidad.denominacion).all()
+    session.close()
+    opciones = [{'label': u.denominacion, 'value': u.gfh} for u in unidades]
+    return opciones
+
+@app.callback(
+    Output('producto-dropdown', 'options'),
+    Input('upload-data', 'contents')  # Se refresca al subir archivo
+)
+def cargar_productos_opciones(_):
+    session = Session()
+    productos = session.query(Producto).order_by(Producto.nombre).all()
+    session.close()
+    opciones = [{'label': p.nombre, 'value': p.espec} for p in productos]
+    return opciones
+
+@app.callback(
     Output('tabla-contenedor', 'children'),
     Input('year-dropdown', 'value'),
     Input('date-picker-range', 'start_date'),
     Input('date-picker-range', 'end_date'),
-    Input('filter-range-checklist', 'value')
+    Input('filter-range-checklist', 'value'),
+    Input('unidad-dropdown', 'value'),
+    Input('producto-dropdown', 'value')  # Nuevo input agregado para producto
 )
-def actualizar_tabla(year_filter, start_date, end_date, range_filter):
+def actualizar_tabla(year_filter, start_date, end_date, range_filter, unidad_gfh, producto_espec):
     filtros_aplicados = False
 
     if year_filter and year_filter != 'Todos':
@@ -331,32 +384,29 @@ def actualizar_tabla(year_filter, start_date, end_date, range_filter):
     if range_filter and len(range_filter) > 0:
         filtros_aplicados = True
 
-    if not filtros_aplicados:
-        # Mostrar TODO sin filtrar, ignorando fechas
-        df = get_table_data_detalle(year_filter=None, start_date=None, end_date=None)
+    # Preparar fechas para filtro
+    start_date_dt = None
+    end_date_dt = None
+
+    if 'este_año' in range_filter:
+        start_date_dt = datetime(datetime.now().year, 1, 1)
+        end_date_dt = datetime.today()
+    elif 'ultimos_12_meses' in range_filter:
+        end_date_dt = datetime.today()
+        start_date_dt = end_date_dt - timedelta(days=365)
     else:
-        # Aplicar filtros de año y checklist
-        start_date_dt = None
-        end_date_dt = None
+        if start_date and end_date:
+            start_date_dt = datetime.strptime(start_date.split("T")[0], '%Y-%m-%d')
+            end_date_dt = datetime.strptime(end_date.split("T")[0], '%Y-%m-%d')
 
-        # Si el checklist tiene rango especial, usarlo
-        if 'este_año' in range_filter:
-            start_date_dt = datetime(datetime.now().year, 1, 1)
-            end_date_dt = datetime.today()
-        elif 'ultimos_12_meses' in range_filter:
-            end_date_dt = datetime.today()
-            start_date_dt = end_date_dt - timedelta(days=365)
-        else:
-            # Si no hay checklist que defina rango, tomar rango solo si ambos dates están presentes
-            if start_date and end_date:
-                start_date_dt = datetime.strptime(start_date.split("T")[0], '%Y-%m-%d')
-                end_date_dt = datetime.strptime(end_date.split("T")[0], '%Y-%m-%d')
+    if end_date_dt:
+        end_date_dt = end_date_dt + timedelta(days=1) - timedelta(microseconds=1)
 
-        # Ajustar end_date para incluir todo el día final
-        if end_date_dt:
-            end_date_dt = end_date_dt + timedelta(days=1) - timedelta(microseconds=1)
-
-        df = get_table_data_detalle(year_filter, start_date_dt, end_date_dt)
+    # Si no hay filtros, mostrar todo sin filtrar fechas ni unidad/producto
+    if not filtros_aplicados and not unidad_gfh and not producto_espec:
+        df = get_table_data_detalle(year_filter=None, start_date=None, end_date=None, unidad_gfh=None, producto_espec=None)
+    else:
+        df = get_table_data_detalle(year_filter, start_date_dt, end_date_dt, unidad_gfh, producto_espec)
 
     if df.empty:
         return html.Div([html.H3("No se encontraron datos.")])
