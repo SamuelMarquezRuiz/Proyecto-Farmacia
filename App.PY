@@ -111,6 +111,9 @@ def insertar_datos_desde_excel_buffer(buffer, ruta_db):
         """)
         conn.commit()
 
+        # Fecha actual para asignar a movimientos
+        fecha_actual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         unidades = df[['tipo', 'denominacion', 'gfh']].drop_duplicates()
         cursor.executemany("""
             INSERT OR IGNORE INTO unidad (tipo, denominacion, gfh)
@@ -126,10 +129,11 @@ def insertar_datos_desde_excel_buffer(buffer, ruta_db):
         conn.commit()
 
         movimientos = df[['gfh', 'espec', 'tipo_e_s']].copy()
+        # Insertar movimientos con fecha actual explícita
         cursor.executemany("""
-            INSERT INTO movimiento (unidad_gfh, producto_espec, tipo_e_s)
-            VALUES (?, ?, ?)
-        """, movimientos.itertuples(index=False, name=None))
+            INSERT INTO movimiento (unidad_gfh, producto_espec, tipo_e_s, fecha)
+            VALUES (?, ?, ?, ?)
+        """, [(row.gfh, row.espec, row.tipo_e_s, fecha_actual) for row in movimientos.itertuples()])
         conn.commit()
 
         num_rows = len(movimientos)
@@ -194,7 +198,7 @@ def get_table_data_detalle(year_filter=None, start_date=None, end_date=None):
         'pmf': float(item.DetalleMovimiento.pmf) if item.DetalleMovimiento.pmf else None,
         'pvl': float(item.DetalleMovimiento.pvl) if item.DetalleMovimiento.pvl else None,
         'pvp': float(item.DetalleMovimiento.pvp) if item.DetalleMovimiento.pvp else None,
-        'fecha_movimiento': item.fecha.strftime('%Y-%m-%d') if item.fecha else "N/A"  # Aquí la protección contra None
+        'fecha_movimiento': item.fecha.strftime('%Y-%m-%d') if item.fecha else "N/A"
     } for item in results])
 
     return df
@@ -311,7 +315,6 @@ def procesar_archivo_subido(contents, filename):
         html.P(resultado)
     ])
 
-
 @app.callback(
     Output('tabla-contenedor', 'children'),
     Input('year-dropdown', 'value'),
@@ -348,6 +351,10 @@ def actualizar_tabla(year_filter, start_date, end_date, range_filter):
             if start_date and end_date:
                 start_date_dt = datetime.strptime(start_date.split("T")[0], '%Y-%m-%d')
                 end_date_dt = datetime.strptime(end_date.split("T")[0], '%Y-%m-%d')
+
+        # Ajustar end_date para incluir todo el día final
+        if end_date_dt:
+            end_date_dt = end_date_dt + timedelta(days=1) - timedelta(microseconds=1)
 
         df = get_table_data_detalle(year_filter, start_date_dt, end_date_dt)
 
